@@ -9,10 +9,9 @@
     html, body {
       height: 100%;
       margin: 0;
-      background: #123e74; /* match your Three background */
+      background: #123e74;
       overflow: hidden;
     }
-
     #c {
       width: 100%;
       height: 100%;
@@ -20,12 +19,20 @@
       touch-action: none;
     }
   </style>
-</head>
 
+  <!-- THIS is what makes "import three" work without npm -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+</head>
 <body>
   <canvas id="c"></canvas>
-
-  <!-- IMPORTANT -->
   <script type="module" src="./main.js"></script>
 </body>
 </html>

@@ -310,7 +310,7 @@ function makeUI() {
   if (isMobilePortrait()) {
     // Mobile: bottom half, centered, safe margin
     popupEl.style.top = "auto";
-    popupEl.style.bottom = "90px"; // above iOS browser chrome
+    popupEl.style.bottom = "30px"; // above iOS browser chrome
     popupEl.style.transform = "translateX(-50%) translateY(8px)";
     popupEl.style.width = "min(92vw, 360px)";
   } else {

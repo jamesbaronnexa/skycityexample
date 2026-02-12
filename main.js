@@ -1,8 +1,24 @@
+// main.js — SkyCity demo (DESKTOP + MOBILE presets, blue bg, big dot buttons, popup responsive)
+// Assumes your HTML uses an importmap for "three" + "three/addons/"
+// and your GLB is at ./model.glb
+
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 const canvas = document.querySelector("#c");
+
+// -------------------- Helpers --------------------
+function isMobilePortrait() {
+  return (
+    window.innerWidth <= 900 &&
+    window.matchMedia &&
+    window.matchMedia("(orientation: portrait)").matches
+  );
+}
+
+// track interaction so we don't keep snapping camera on resize
+let userInteracted = false;
 
 // -------------------- Renderer --------------------
 const renderer = new THREE.WebGLRenderer({
@@ -45,17 +61,20 @@ controls.panSpeed = 0.8;
 controls.minPolarAngle = 0.15;
 controls.maxPolarAngle = Math.PI * 0.49;
 
-// Track user interaction so we don't override their view
-let userInteracted = false;
+// mark interaction + hide popup when user moves camera
 controls.addEventListener("start", () => {
   userInteracted = true;
-  hidePopup?.();
+  hidePopup();
+});
+renderer.domElement.addEventListener("pointerdown", () => {
+  userInteracted = true;
+  hidePopup();
 });
 
 // -------------------- Lighting (soft Redshift-ish) --------------------
 scene.add(new THREE.HemisphereLight(0xffffff, 0x20242c, 1.2));
 
-const sun = new THREE.DirectionalLight(0xffffff, 0.70);
+const sun = new THREE.DirectionalLight(0xffffff, 0.7);
 sun.position.set(-21700, 124800, 43300);
 sun.castShadow = true;
 
@@ -74,7 +93,7 @@ sun.shadow.camera.bottom = -60000;
 
 scene.add(sun);
 
-// -------------------- Camera Presets (your values) --------------------
+// -------------------- Camera Presets (desktop) --------------------
 const PRESET_HOME = {
   name: "Home",
   pos: new THREE.Vector3(17624.882, 27630.32, -12916.264),
@@ -87,56 +106,24 @@ const PRESET_FED = {
   target: new THREE.Vector3(6552.512, -8971.525, -2939.588),
 };
 
-// -------------------- Responsive helpers --------------------
-function isMobilePortrait() {
-  // works well for iPhone/Android portrait
-  return (
-    window.matchMedia?.("(orientation: portrait)").matches &&
-    window.innerWidth <= 900
-  );
+// -------------------- Camera Presets (mobile portrait) --------------------
+const PRESET_HOME_MOBILE = {
+  name: "Home Mobile",
+  pos: new THREE.Vector3(16771.504, 44049.7, -14394.172),
+  target: new THREE.Vector3(2601.223, -5520.177, -1666.704),
+};
+
+const PRESET_FED_MOBILE = {
+  name: "Fed Mobile",
+  pos: new THREE.Vector3(9332.957, -7553.001, -22851.309),
+  target: new THREE.Vector3(6457.856, -8185.593, -2928.293),
+};
+
+function getPresetHome() {
+  return isMobilePortrait() ? PRESET_HOME_MOBILE : PRESET_HOME;
 }
-
-// Fit camera to model (for mobile portrait so nothing crops)
-function fitCameraToObject(box, fitOffset = 1.25) {
-  const size = box.getSize(new THREE.Vector3());
-  const center = box.getCenter(new THREE.Vector3());
-
-  const maxSize = Math.max(size.x, size.y, size.z);
-  const fov = THREE.MathUtils.degToRad(camera.fov);
-  const cameraZ = Math.abs((maxSize / 2) / Math.tan(fov / 2)) * fitOffset;
-
-  // keep your current viewing direction, just pull back
-  const dir = new THREE.Vector3()
-    .subVectors(camera.position, controls.target)
-    .normalize();
-
-  const newPos = center.clone().add(dir.multiplyScalar(cameraZ));
-
-  camera.position.copy(newPos);
-  controls.target.copy(center);
-  controls.update();
-
-  // keep a sensible zoom range
-  controls.minDistance = maxSize * 0.25;
-  controls.maxDistance = maxSize * 3.0;
-}
-
-// Apply the “right” start view depending on device
-function applyResponsiveStartView(modelBox) {
-  if (userInteracted) return;
-  if (fly) return;
-
-  if (isMobilePortrait()) {
-    // Start from the HOME direction but framed to fit
-    camera.position.copy(PRESET_HOME.pos);
-    controls.target.copy(PRESET_HOME.target);
-    controls.update();
-    fitCameraToObject(modelBox, 1.35); // pull back a touch more for portrait
-  } else {
-    camera.position.copy(PRESET_HOME.pos);
-    controls.target.copy(PRESET_HOME.target);
-    controls.update();
-  }
+function getPresetFed() {
+  return isMobilePortrait() ? PRESET_FED_MOBILE : PRESET_FED;
 }
 
 // -------------------- Smooth camera fly --------------------
@@ -146,7 +133,7 @@ function easeInOutCubic(t) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
-function flyToPreset(preset, seconds = 1.35) {
+function flyToPreset(preset, seconds = 1.35, onArrive = null) {
   fly = {
     start: performance.now(),
     seconds,
@@ -154,6 +141,7 @@ function flyToPreset(preset, seconds = 1.35) {
     toPos: preset.pos.clone(),
     fromTarget: controls.target.clone(),
     toTarget: preset.target.clone(),
+    onArrive,
   };
   controls.enabled = false; // prevent fighting
 }
@@ -169,19 +157,16 @@ function applyFly() {
   controls.update();
 
   if (t >= 1) {
+    const cb = fly.onArrive;
     fly = null;
     controls.enabled = true;
+    if (typeof cb === "function") cb();
   }
 }
 
 // -------------------- Model loading --------------------
 const loader = new GLTFLoader();
 let root = null;
-let modelBox = null;
-
-// popup handlers (defined in makeUI)
-let showPopup = null;
-let hidePopup = null;
 
 function applyMaterialDefaults() {
   const maxAniso = renderer.capabilities.getMaxAnisotropy();
@@ -221,11 +206,11 @@ loader.load(
     applyMaterialDefaults();
     centerModelAtOrigin();
 
-    // compute box AFTER centering (center should be ~0,0,0)
-    modelBox = new THREE.Box3().setFromObject(root);
-
-    // Start view depends on device
-    applyResponsiveStartView(modelBox);
+    // Start at correct camera for device
+    const startPreset = getPresetHome();
+    camera.position.copy(startPreset.pos);
+    controls.target.copy(startPreset.target);
+    controls.update();
 
     makeUI(); // build UI after everything exists
   },
@@ -236,13 +221,15 @@ loader.load(
   }
 );
 
-// -------------------- UI (camera dots + popup) --------------------
+// -------------------- UI (big dots + popup) --------------------
+let popupEl = null;
+
 function makeUI() {
-  // --- Camera dots (bigger + more prominent, left side like your ref) ---
+  // ----- BIG DOT CAMERA BUTTONS (left side) -----
   const camCol = document.createElement("div");
   camCol.style.position = "fixed";
-  camCol.style.left = "16px";
-  camCol.style.top = "120px";
+  camCol.style.left = "18px";
+  camCol.style.top = "110px";
   camCol.style.zIndex = "50";
   camCol.style.display = "flex";
   camCol.style.flexDirection = "column";
@@ -250,135 +237,159 @@ function makeUI() {
   camCol.style.userSelect = "none";
   document.body.appendChild(camCol);
 
-  const styleDot = (btn, fill) => {
+  function makeDot(label, bg, ring) {
+    const btn = document.createElement("button");
     btn.type = "button";
+    btn.textContent = label;
+
     btn.style.width = "64px";
     btn.style.height = "64px";
     btn.style.borderRadius = "999px";
-    btn.style.border = "4px solid rgba(255,255,255,.85)";
-    btn.style.background = fill;
-    btn.style.boxShadow = "0 10px 24px rgba(0,0,0,.28)";
+    btn.style.border = `4px solid ${ring}`;
+    btn.style.background = bg;
+    btn.style.color = "white";
+    btn.style.font = "700 20px system-ui, -apple-system, Segoe UI, Roboto, Arial";
     btn.style.display = "grid";
     btn.style.placeItems = "center";
     btn.style.cursor = "pointer";
-    btn.style.color = "white";
-    btn.style.font = "700 20px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    btn.style.boxShadow = "0 10px 26px rgba(0,0,0,.35)";
     btn.style.webkitTapHighlightColor = "transparent";
+    btn.style.transform = "translateZ(0)";
+    btn.onmouseenter = () => (btn.style.filter = "brightness(1.05)");
+    btn.onmouseleave = () => (btn.style.filter = "none");
+    return btn;
+  }
+
+  // Match your reference vibe: cyan + yellow
+  const btn1 = makeDot("1", "#29B6F6", "rgba(255,255,255,.75)");
+  const btn2 = makeDot("2", "#F5A623", "rgba(255,255,255,.75)");
+
+  btn1.title = "View 1 (Home)";
+  btn2.title = "View 2 (Fed Street)";
+
+  btn1.onclick = () => {
+    hidePopup();
+    flyToPreset(getPresetHome(), 1.15);
   };
 
-  const btn1 = document.createElement("button");
-  btn1.title = "View 1 (Home)";
-  btn1.textContent = "1";
-  styleDot(btn1, "#29B6F6"); // blue
-
-  const btn2 = document.createElement("button");
-  btn2.title = "View 2 (Fed Street)";
-  btn2.textContent = "2";
-  styleDot(btn2, "#F9A825"); // yellow
+  btn2.onclick = () => {
+    hidePopup();
+    flyToPreset(getPresetFed(), 1.25, () => {
+      showPopup(); // show after camera arrives at view 2
+    });
+  };
 
   camCol.appendChild(btn1);
   camCol.appendChild(btn2);
 
-  btn1.onclick = () => {
-    hidePopup();
-    flyToPreset(PRESET_HOME, 1.25);
-  };
+  // ----- POPUP (yellow button style + lorem) -----
+  popupEl = document.createElement("div");
+  popupEl.style.position = "fixed";
+  popupEl.style.zIndex = "60";
+  popupEl.style.opacity = "0";
+  popupEl.style.transform = "translateY(8px)";
+  popupEl.style.pointerEvents = "none";
+  popupEl.style.transition = "opacity 220ms ease, transform 220ms ease";
 
-  btn2.onclick = () => {
-    flyToPreset(PRESET_FED, 1.35);
-    // show popup AFTER the fly ends (approx)
-    setTimeout(() => showPopup(), 1200);
-  };
+  popupEl.style.borderRadius = "16px";
+  popupEl.style.border = "1px solid rgba(255,255,255,.18)";
+  popupEl.style.background = "rgba(0,0,0,.55)";
+  popupEl.style.backdropFilter = "blur(10px)";
+  popupEl.style.color = "rgba(255,255,255,.95)";
+  popupEl.style.boxShadow = "0 18px 40px rgba(0,0,0,.35)";
+  popupEl.style.padding = "14px";
+  popupEl.style.font = "13px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Arial";
 
-  // --- Copy camera button ---
-  const copyBtn = document.createElement("button");
-  copyBtn.textContent = "Copy camera";
-  copyBtn.style.position = "fixed";
-  copyBtn.style.left = "16px";
-  copyBtn.style.bottom = "110px";
-  copyBtn.style.zIndex = "50";
-  copyBtn.style.padding = "14px 18px";
-  copyBtn.style.borderRadius = "14px";
-  copyBtn.style.border = "1px solid rgba(255,255,255,.25)";
-  copyBtn.style.background = "rgba(255,255,255,.18)";
-  copyBtn.style.backdropFilter = "blur(10px)";
-  copyBtn.style.color = "rgba(255,255,255,.95)";
-  copyBtn.style.font = "600 14px system-ui, -apple-system, Segoe UI, Roboto, Arial";
-  copyBtn.style.boxShadow = "0 10px 28px rgba(0,0,0,.30)";
-  copyBtn.style.cursor = "pointer";
-  document.body.appendChild(copyBtn);
+  // responsive sizing (desktop vs mobile)
+  function applyPopupLayout() {
+    if (!popupEl) return;
 
-  async function copyText(text) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      ta.remove();
-      return true;
+    if (isMobilePortrait()) {
+      // mobile: centered-ish, slightly right of center, with safe margins
+      popupEl.style.left = "52%";
+      popupEl.style.top = "52%";
+      popupEl.style.right = "auto";
+      popupEl.style.bottom = "auto";
+      popupEl.style.transform = "translate(-50%, -50%) translateY(8px)";
+      popupEl.style.width = "min(320px, calc(100vw - 32px))";
+      popupEl.style.maxWidth = "320px";
+    } else {
+      // desktop: center, just right of center line
+      popupEl.style.left = "56%";
+      popupEl.style.top = "50%";
+      popupEl.style.right = "auto";
+      popupEl.style.bottom = "auto";
+      popupEl.style.transform = "translate(-50%, -50%) translateY(8px)";
+      popupEl.style.width = "360px";
+      popupEl.style.maxWidth = "360px";
     }
   }
 
-  copyBtn.onclick = async () => {
-    const obj = `{
-  "name": "Current",
-  "pos": [${camera.position.x.toFixed(3)}, ${camera.position.y.toFixed(3)}, ${camera.position.z.toFixed(3)}],
-  "target": [${controls.target.x.toFixed(3)}, ${controls.target.y.toFixed(3)}, ${controls.target.z.toFixed(3)}]
-}`;
-    await copyText(obj);
-  };
-
-  // --- Popup (center-right) ---
-  const popup = document.createElement("div");
-  popup.style.position = "fixed";
-  popup.style.left = "56%";
-  popup.style.top = "50%";
-  popup.style.transform = "translateY(-50%)";
-  popup.style.width = "320px";
-  popup.style.maxWidth = "86vw";
-  popup.style.padding = "18px";
-  popup.style.borderRadius = "16px";
-  popup.style.background = "rgba(255,255,255,.95)";
-  popup.style.color = "#0b0c10";
-  popup.style.boxShadow = "0 18px 48px rgba(0,0,0,.35)";
-  popup.style.zIndex = "60";
-  popup.style.opacity = "0";
-  popup.style.pointerEvents = "none";
-  popup.style.transition = "opacity 260ms ease";
-  popup.innerHTML = `
+  popupEl.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-      <div style="width:10px;height:10px;border-radius:999px;background:#F9A825;"></div>
-      <div style="font-weight:800;">Federal Street</div>
+      <div style="width:10px;height:10px;border-radius:999px;background:#F5A623;box-shadow:0 0 0 4px rgba(245,166,35,.25);"></div>
+      <div style="font-weight:800;letter-spacing:.2px;">Fed Street</div>
+      <div style="margin-left:auto;opacity:.75;font-size:12px;">Arrived</div>
     </div>
-    <div style="font-size:13px;line-height:1.45;opacity:.9;">
+
+    <div style="opacity:.92;margin-bottom:12px;">
       Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
     </div>
+
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button id="popupBtn" type="button"
+        style="
+          pointer-events:auto;
+          padding:10px 12px;
+          border-radius:12px;
+          border:1px solid rgba(0,0,0,.18);
+          background:#F5A623;
+          color:#101010;
+          font:800 13px system-ui, -apple-system, Segoe UI, Roboto, Arial;
+          cursor:pointer;
+          box-shadow:0 10px 18px rgba(0,0,0,.25);
+        ">
+        Sample CTA
+      </button>
+      <div style="opacity:.7;font-size:12px;">(drag to dismiss)</div>
+    </div>
   `;
-  document.body.appendChild(popup);
 
-  showPopup = () => {
-    popup.style.opacity = "1";
-    popup.style.pointerEvents = "auto";
-  };
-  hidePopup = () => {
-    popup.style.opacity = "0";
-    popup.style.pointerEvents = "none";
-  };
+  document.body.appendChild(popupEl);
+  applyPopupLayout();
 
-  // Hide popup if the user drags/zooms/pans
-  controls.addEventListener("start", () => hidePopup());
+  // dismiss popup if they interact
+  const popupBtn = popupEl.querySelector("#popupBtn");
+  popupBtn.addEventListener("click", () => {
+    // placeholder action
+    console.log("Popup CTA clicked");
+  });
+
+  // keep popup layout correct on resize/orientation
+  window.addEventListener("resize", applyPopupLayout);
 
   // Escape -> Home
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       hidePopup();
-      flyToPreset(PRESET_HOME, 1.05);
+      flyToPreset(getPresetHome(), 1.05);
     }
   });
+}
+
+function showPopup() {
+  if (!popupEl) return;
+  // reset transform baseline (layout sets translate... translateY(8px))
+  popupEl.style.opacity = "1";
+  popupEl.style.transform = popupEl.style.transform.replace("translateY(8px)", "translateY(0px)");
+}
+
+function hidePopup() {
+  if (!popupEl) return;
+  popupEl.style.opacity = "0";
+  if (!popupEl.style.transform.includes("translateY(8px)")) {
+    popupEl.style.transform = popupEl.style.transform.replace("translateY(0px)", "translateY(8px)");
+  }
 }
 
 // -------------------- Resize + render loop --------------------
@@ -389,9 +400,12 @@ function resize() {
   camera.updateProjectionMatrix();
   renderer.setSize(w, h);
 
-  // On mobile rotate/orientation changes, re-frame ONLY if user hasn't interacted
-  if (root && modelBox && !userInteracted && !fly) {
-    applyResponsiveStartView(modelBox);
+  // If user hasn't interacted, keep the correct "home" framing for orientation changes
+  if (!userInteracted && root) {
+    const startPreset = getPresetHome();
+    camera.position.copy(startPreset.pos);
+    controls.target.copy(startPreset.target);
+    controls.update();
   }
 }
 window.addEventListener("resize", resize);

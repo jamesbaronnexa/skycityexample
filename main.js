@@ -302,28 +302,26 @@ function makeUI() {
 
   // responsive sizing (desktop vs mobile)
   function applyPopupLayout() {
-    if (!popupEl) return;
+  if (!popupEl) return;
 
-    if (isMobilePortrait()) {
-      // mobile: centered-ish, slightly right of center, with safe margins
-      popupEl.style.left = "52%";
-      popupEl.style.top = "52%";
-      popupEl.style.right = "auto";
-      popupEl.style.bottom = "auto";
-      popupEl.style.transform = "translate(-50%, -50%) translateY(8px)";
-      popupEl.style.width = "min(320px, calc(100vw - 32px))";
-      popupEl.style.maxWidth = "320px";
-    } else {
-      // desktop: center, just right of center line
-      popupEl.style.left = "56%";
-      popupEl.style.top = "50%";
-      popupEl.style.right = "auto";
-      popupEl.style.bottom = "auto";
-      popupEl.style.transform = "translate(-50%, -50%) translateY(8px)";
-      popupEl.style.width = "360px";
-      popupEl.style.maxWidth = "360px";
-    }
+  popupEl.style.left = "50%";
+  popupEl.style.right = "auto";
+
+  if (isMobilePortrait()) {
+    // Mobile: bottom half, centered, safe margin
+    popupEl.style.top = "auto";
+    popupEl.style.bottom = "90px"; // above iOS browser chrome
+    popupEl.style.transform = "translateX(-50%) translateY(8px)";
+    popupEl.style.width = "min(92vw, 360px)";
+  } else {
+    // Desktop: bottom half but slightly above bottom
+    popupEl.style.top = "auto";
+    popupEl.style.bottom = "60px";
+    popupEl.style.transform = "translateX(-50%) translateY(8px)";
+    popupEl.style.width = "380px";
   }
+}
+
 
   popupEl.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
@@ -379,18 +377,17 @@ function makeUI() {
 
 function showPopup() {
   if (!popupEl) return;
-  // reset transform baseline (layout sets translate... translateY(8px))
   popupEl.style.opacity = "1";
   popupEl.style.transform = popupEl.style.transform.replace("translateY(8px)", "translateY(0px)");
 }
 
+
 function hidePopup() {
   if (!popupEl) return;
   popupEl.style.opacity = "0";
-  if (!popupEl.style.transform.includes("translateY(8px)")) {
-    popupEl.style.transform = popupEl.style.transform.replace("translateY(0px)", "translateY(8px)");
-  }
+  popupEl.style.transform = popupEl.style.transform.replace("translateY(0px)", "translateY(8px)");
 }
+
 
 // -------------------- Resize + render loop --------------------
 function resize() {
